@@ -1,21 +1,37 @@
-%% Load data
-spots = readtable('/path/to/spots.csv');
-tracks = readtable('/path/to/tracks.csv');
+clear all
+%% User inputs
+% Define path to spots and tracks files
+spotsFile='path/to/file';
+tracksFile='path/to/file';
 % Define sister pairs and homologue groups
 sister_pairs = {{0,4}, {5,7}, {10,13}, {14,15}, {20}, {22}};
 homologes = {{0,4,5,7}, {10,13,14,15}, {20,22}};
 
+%% Analyse, plot and save data
+% Load data
+spots = readtable(spotsFile);
+tracks = readtable(tracksFile);
+%Get base filename
+[~, spotsBase, ~]  = fileparts(spotsFile);
+spotsBase = erase(spotsBase, '_spots');
+% Build output filenames
+meanCSV    = sprintf('mean_speeds_%s.csv', spotsBase);
+sistersCSV    = sprintf('distance_between_sisters_%s.csv', spotsBase);
+homologuesCSV = sprintf('distance_between_homologues_%s.csv', spotsBase);
+
+
 %% Plot mean speed per track
-trackIDs = tracks.TRACK_ID;
-meanSpeeds = tracks.TRACK_MEAN_SPEED;
-stdSpeeds = tracks.TRACK_STD_SPEED;
+mean_speeds_table = table(tracks.TRACK_ID, tracks.TRACK_MEAN_SPEED, tracks.TRACK_STD_SPEED, ...
+    'VariableNames', {'Track_IDs', 'Mean_Speed', 'Std_Speed'});
+writetable(mean_speeds_table,meanCSV);
 
 figure;
-errorbar(trackIDs, meanSpeeds, stdSpeeds, 'o');
+errorbar(mean_speeds_table.Track_IDs, mean_speeds_table.Mean_Speed, mean_speeds_table.Std_Speed, 'o');
 xlabel('Track ID');
 ylabel('Mean Speed');
 title('Mean Speed with standard deviation for each Track ID');
 grid on;
+
 
 %% Create subplots for distances
 %Find which contain sister track pairs (rather than single tracks)
@@ -30,18 +46,38 @@ num_sister_plots = length(pairs);
 % Count homologue plots (4-track groups with two sister pairs, and 2-track groups)
 num_homologue_plots = length(homologes);
 
+% Set up table
+distances_table = table();
+% Convert each cell to a string label
+sisterNames = cellfun(@(x) sprintf('sisters%dand%d', x{:}), sister_pairs, 'UniformOutput', false);
+framesNames = cellfun(@(x) sprintf('frames%dand%d', x{:}), sister_pairs, 'UniformOutput', false);
+% Special case: handle single-element cells
+for i = 1:numel(sister_pairs)
+    if numel(sister_pairs{i}) == 1
+        sisterNames{i} = sprintf('sisters%d', sister_pairs{i}{1});
+        framesNames{i} = sprintf('frames%d', sister_pairs{i}{1});
+    end
+end
 % Create figures for sisters
 figsisters = figure('Name', 'Distances between sisters');
 axsisters = gobjects(num_sister_plots,1);
 for i = 1:num_sister_plots
     axsisters(i) = subplot(num_sister_plots, 1, i, 'Parent', figsisters);
 end
-% Plot sisters distances
+% Plot and save sisters distances
 for i = 1:num_sister_plots
     pair = pairs{i};
     [dist, frames, ~] = compute_track_pair_metrics(spots, pair);
     plot_distance(frames, dist, pair, 'Distance between sisters', axsisters(i));
+    distances_table.(framesNames{i}) = frames;
+    distances_table.(sisterNames{i}) = dist;
 end
+writetable(distances_table,sistersCSV)
+
+% Create homologue distances table
+homologue_table = table();
+homologueNames = cellfun(@(x) sprintf('homologues%s', strjoin(string(x), '_')), homologes, 'UniformOutput', false);
+framesHomologueNames = cellfun(@(x) sprintf('frames%s', strjoin(string(x), '_')), homologes, 'UniformOutput', false);
 
 % Create figures for homologues
 figHomologues = figure('Name', 'Distances between Homologues');
@@ -49,8 +85,9 @@ axHomologues = gobjects(num_homologue_plots,1);
 for i = 1:num_homologue_plots
     axHomologues(i) = subplot(num_homologue_plots, 1, i, 'Parent', figHomologues);
 end
-% Plot homologues distances
-hom_idx = 1; % Index for homologue subplot axes
+
+% Plot homologues distances and fill table
+hom_idx = 1; % Index for subplot axes
 for j = 1:length(homologes)
     if length(homologes{j}) == 4  % Two sister pairs
         dp1 = sister_pairs{2*j-1};
@@ -64,18 +101,31 @@ for j = 1:length(homologes)
 
             plot_distance(commonFrames, distances_between_means, ...
                 {dp1{1}, dp1{2}, dp2{1}, dp2{2}}, 'Distance between Homologues', axHomologues(hom_idx));
+
+            % Add to table
+            homologue_table.(framesHomologueNames{j}) = commonFrames;
+            homologue_table.(homologueNames{j}) = distances_between_means;
+
             hom_idx = hom_idx + 1;
         end
     elseif length(homologes{j}) == 2  % Simple homolog pair
         [dist, frames, ~] = compute_track_pair_metrics(spots, homologes{j});
         plot_distance(frames, dist, homologes{j}, 'Distance between Homologues', axHomologues(hom_idx));
+
+        % Add to table
+        homologue_table.(framesHomologueNames{j}) = frames;
+        homologue_table.(homologueNames{j}) = dist;
+
         hom_idx = hom_idx + 1;
     end
 end
 
+% Save table to CSV
+writetable(homologue_table, homologuesCSV);
+
 %% Functions
 function [distances, commonFrames, meanPositions] = compute_track_pair_metrics(spots, track_ids)
-    %Computer distances and mean positions between two tracks
+    %Compute distances and mean positions between two tracks
     trackA = spots(spots.TRACK_ID == track_ids{1}, :);
     trackB = spots(spots.TRACK_ID == track_ids{2}, :);
 
